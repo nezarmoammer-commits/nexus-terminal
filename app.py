@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-NEXUS Terminal Master Edition — النسخة الاحترافية المكتملة والمطورة
+NEXUS Terminal Master Edition — النسخة الاحترافية المكتملة والمطورة (Multi-TF Scanner)
 ========================================================================================
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ CSS = """
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
 html, body, .stApp, [class*="st-"] { font-family: 'IBM Plex Sans Arabic', 'Segoe UI', sans-serif; }
 .stApp { background: #0b0e11; color: #eaecef; }
-.block-container { padding-top: 1.1rem; max-width: 1500px; }
+.block-container { padding-top: 1.1rem; max-width: 1550px; }
 footer, #MainMenu { visibility: hidden; }
 [data-testid="stSidebar"] { background: #0f1317; border-left: 1px solid #2b3139; }
 [data-testid="stSidebar"] * { color: #eaecef; }
@@ -63,15 +63,16 @@ input, textarea, [data-baseweb="select"] > div { background: #161a1e !important;
 .sig { direction: rtl; text-align: right; background: #161a1e; border: 1px solid #2b3139; border-top: 3px solid var(--c);
        border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
 .sig-top { display: flex; justify-content: space-between; align-items: center; }
-.sym { font-size: 1.25rem; font-weight: 700; }
+.sym { font-size: 1.2rem; font-weight: 700; }
 .sym small { color: #848e9c; font-weight: 500; font-size: .75rem; margin-right: 3px; }
-.badge { padding: 3px 12px; border-radius: 4px; font-weight: 700; font-size: .9rem; }
-.sig-kind { margin-top: 8px; font-weight: 600; color: #eaecef; }
-.sig-strat { color: #848e9c; font-size: .82rem; margin-bottom: 8px; }
+.badge { padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: .85rem; }
+.tf-badge { background: #2b3139; color: #fcd535; padding: 2px 8px; border-radius: 4px; font-size: .75rem; font-weight: 600; }
+.sig-kind { margin-top: 8px; font-weight: 600; color: #eaecef; font-size: .9rem; }
+.sig-strat { color: #848e9c; font-size: .8rem; margin-bottom: 8px; }
 .bar { height: 5px; background: #2b3139; border-radius: 3px; overflow: hidden; }
 .bar i { display: block; height: 100%; }
 .sig-conf { color: #848e9c; font-size: .78rem; margin: 4px 0 8px; }
-.lv { display: flex; justify-content: space-between; font-size: .85rem; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.lv { display: flex; justify-content: space-between; font-size: .82rem; padding: 2px 0; font-variant-numeric: tabular-nums; }
 .lv span { color: #848e9c; }
 .note { direction: rtl; text-align: right; color: #848e9c; font-size: .85rem; }
 </style>
@@ -178,7 +179,7 @@ class Hub:
                     last = float(d.Close.iloc[-1])
                     r = np.random.default_rng(zlib.crc32(b.encode()))
                     out[s] = {"symbol": s, "last": last, "percentage": (last / float(d.Close.iloc[-96]) - 1) * 100,
-                              "quoteVolume": float(r.uniform(2e6, 9e8)), "high": float(d.High.tail(96).max()),
+                              "quoteVolume": float(r.uniform(2e5, 9e8)), "high": float(d.High.tail(96).max()),
                               "low": float(d.Low.tail(96).min())}
                 return out
             return self.ex[mk].fetch_tickers()
@@ -187,7 +188,7 @@ class Hub:
             self.error = str(e)[:300]
             return {}
 
-    def universe(self, mk: str, min_vol: float) -> list:
+    def universe(self, mk: str, min_vol: float, sort_asc: bool = False) -> list:
         tk = self.tickers(mk)
         suffix = "/USDT:USDT" if mk == "futures" else "/USDT"
         out = []
@@ -197,7 +198,7 @@ class Hub:
             if base in STABLES or base.endswith(("BULL", "BEAR")): continue
             qv = t.get("quoteVolume") or 0
             if qv >= min_vol: out.append((s, float(qv)))
-        out.sort(key=lambda x: -x[1])
+        out.sort(key=lambda x: x[1] if sort_asc else -x[1])
         return out
 
     def ohlcv(self, mk: str, sym: str, tf: str, limit: int = 300, ttl: int = 15):
@@ -538,6 +539,11 @@ def kind_label(key: str, side: str) -> str:
     if k == "trend": return "📈 تتبّع اتجاه"
     return "🟢 اقتناص قاع" if side == "LONG" else "🔴 اقتناص قمة"
 
+def tf_duration_label(tf: str) -> str:
+    if tf in ["1m", "3m", "5m"]: return "⚡ صفقة خاطفة (Scalp)"
+    if tf in ["15m", "30m", "1h"]: return "📈 صفقة متوسطة (Intraday)"
+    return "🏆 صفقة طويلة (Swing)"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # محرك الذكاء الاصطناعي الذاتي وتفحص البيتكوين
 # ──────────────────────────────────────────────────────────────────────────────
@@ -558,17 +564,14 @@ def autonomous_ai_confirmation(sym: str, side: str, price: float, rsi: float, vo
     ai_boost = 0.0
     reason = "مؤشرات فنية قياسية"
 
-    # 1. فلتر اتجاه البيتكوين العام
     if btc_regime == "BEARISH" and side == "LONG":
         return max(score - 30.0, 0.0), "⚠️ تحذير AI: اتجاه البيتكوين هابط عاماً"
     if btc_regime == "BULLISH" and side == "SHORT":
         return max(score - 30.0, 0.0), "⚠️ تحذير AI: اتجاه البيتكوين صاعد عاماً"
 
-    # 2. فلتر السيولة العالية والانحرافات
     if volr > 4.0:
         return max(score - 20.0, 0.0), "⚠️ تحذير AI: شمعة تصفية حادة (Liquidation Sweep)"
 
-    # 3. الحماية من الارتدادات
     if side == "SHORT":
         if rsi_htf < 38 or rsi < 36:
             return max(score - 35.0, 0.0), "⚠️ تحذير AI: تشبع بيعي حاد - خطر ارتداد"
@@ -602,9 +605,9 @@ def ml_prob(d: pd.DataFrame):
         return float(m.predict_proba(X.values[[n - 2]])[0][1])
     except Exception: return None
 
-def analyze_symbol(hub: Hub, cfg: dict, sym: str, tk: dict | None = None, btc_regime: str = "NEUTRAL"):
+def analyze_symbol_tf(hub: Hub, cfg: dict, sym: str, tf: str, tk: dict | None = None, btc_regime: str = "NEUTRAL"):
     mk = cfg["mk"]
-    df = hub.ohlcv(mk, sym, cfg["tf"], 300)
+    df = hub.ohlcv(mk, sym, tf, 300)
     if df is None or len(df) < 150: return None
     d = add_indicators(df)
     i = -2
@@ -621,7 +624,7 @@ def analyze_symbol(hub: Hub, cfg: dict, sym: str, tk: dict | None = None, btc_re
     key, side, score = max(hits, key=lambda h: h[2])
 
     rsi_htf = 50.0
-    hd = hub.ohlcv(mk, sym, HTF_MAP.get(cfg["tf"], "1h"), 120)
+    hd = hub.ohlcv(mk, sym, HTF_MAP.get(tf, "1h"), 120)
     if hd is not None and len(hd) > 60:
         hd_ind = add_indicators(hd)
         rsi_htf = float(hd_ind.RSI.iloc[-2])
@@ -660,22 +663,34 @@ def analyze_symbol(hub: Hub, cfg: dict, sym: str, tk: dict | None = None, btc_re
     tp3 = entry_price + sg * S.tps[2] * atr
 
     return {
-        "symbol": sym, "base": sym.split("/")[0], "mk": mk, "side": side, "key": key, "label": S.label,
-        "kind_label": kind_label(key, side), "conf": float(np.clip(score, 0, 99)), "agree": len(hits),
-        "entry": entry_price, "sl": sl, "tps": [tp1, tp2, tp3], "rr": abs(tp2 - entry_price) / max(dist_sl, 1e-8),
-        "atr": atr, "slm": S.sl, "tpm": list(S.tps), "rsi": rsi_now, "adx": float(d.ADX.iloc[i]),
-        "volr": vol_now, "chg": float((tk or {}).get("percentage") or 0), "ml": ml, "htf": htf,
+        "symbol": sym, "base": sym.split("/")[0], "mk": mk, "tf": tf, "side": side, "key": key, "label": S.label,
+        "kind_label": kind_label(key, side), "tf_desc": tf_duration_label(tf), "conf": float(np.clip(score, 0, 99)),
+        "agree": len(hits), "entry": entry_price, "sl": sl, "tps": [tp1, tp2, tp3],
+        "rr": abs(tp2 - entry_price) / max(dist_sl, 1e-8), "atr": atr, "slm": S.sl, "tpm": list(S.tps),
+        "rsi": rsi_now, "adx": float(d.ADX.iloc[i]), "volr": vol_now, "chg": float((tk or {}).get("percentage") or 0),
+        "vol24": float((tk or {}).get("quoteVolume") or 0), "ml": ml, "htf": htf,
         "ai_reason": ai_reason, "prot_low": float(d.Protected_Low.iloc[-1] or 0), "ts": time.time(),
     }
 
+def analyze_symbol_all_tfs(hub: Hub, cfg: dict, sym: str, tk: dict | None = None, btc_regime: str = "NEUTRAL"):
+    target_tfs = cfg.get("scan_tfs", ["1m", "5m", "15m", "1h", "4h", "1d"])
+    best_sig = None
+    for tf in target_tfs:
+        res = analyze_symbol_tf(hub, cfg, sym, tf, tk, btc_regime)
+        if res:
+            if best_sig is None or res["conf"] > best_sig["conf"]:
+                best_sig = res
+    return best_sig
+
 def run_scan(hub: Hub, cfg: dict, progress=None):
-    uni = hub.universe(cfg["mk"], cfg["min_vol"])[:cfg["limit"]]
+    sort_asc = cfg.get("sort_order") == "من الأدنى إلى الأعلى"
+    uni = hub.universe(cfg["mk"], cfg["min_vol"], sort_asc=sort_asc)[:cfg["limit"]]
     tick = hub.tickers(cfg["mk"])
     btc_regime = check_btc_regime(hub, cfg["mk"])
     out, done = [], 0
     if not uni: return out, 0
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        futs = {ex.submit(analyze_symbol, hub, cfg, s, tick.get(s), btc_regime): s for s, _ in uni}
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(analyze_symbol_all_tfs, hub, cfg, s, tick.get(s), btc_regime): s for s, _ in uni}
         for f in as_completed(futs):
             done += 1
             try: r = f.result()
@@ -708,7 +723,6 @@ def calculate_dynamic_position_size(balance: float, risk_pct: float, entry: floa
 def advance(p: dict, low: float, high: float, atr: float = 0.0) -> list:
     ev, hit_tp, s = [], False, p["side"]
     
-    # الوقف المتحرك الديناميكي (Trailing Stop)
     if p["stage"] >= 1 and atr > 0:
         if s == 1: p["sl"] = max(p["sl"], high - 1.5 * atr)
         else: p["sl"] = min(p["sl"], low + 1.5 * atr)
@@ -865,234 +879,4 @@ def acct_stats(a: dict, px: dict) -> dict:
     wins = [x["pnl"] for x in h if x["pnl"] > 0]
     loss = [x["pnl"] for x in h if x["pnl"] <= 0]
     pf = sum(wins) / abs(sum(loss)) if loss and sum(loss) != 0 else (float("inf") if wins else 0.0)
-    eqs = [e[1] for e in a["equity"]] or [a["start"]]
-    peak, dd = eqs[0], 0.0
-    for e in eqs:
-        peak = max(peak, e)
-        dd = max(dd, (peak - e) / peak * 100 if peak else 0)
-    return {"equity": a["balance"] + un, "unreal": un, "total": a["balance"] + un - a["start"],
-            "wr": len(wins) / len(h) * 100 if h else 0.0, "n": len(h), "pf": pf, "dd": dd}
-
-def card_html(s: dict) -> str:
-    long = s["side"] == "LONG"
-    col = UP if long else DOWN
-    rows = "".join(f'<div class="lv"><span>{n}</span><b>{fp(v)}</b></div>' for n, v in
-                   (("دخول", s["entry"]), ("وقف الخسارة", s["sl"]), ("الهدف 1", s["tps"][0]),
-                    ("الهدف 2", s["tps"][1]), ("الهدف 3", s["tps"][2])))
-    return (f'<div class="sig" style="--c:{col}"><div class="sig-top"><span class="sym">{s["base"]}<small>/USDT</small></span>'
-            f'<span class="badge" style="background:{col}26;color:{col}">{"▲ شراء" if long else "▼ بيع"}</span></div>'
-            f'<div class="sig-kind">{s["kind_label"]}</div><div class="sig-strat">{s["label"]}</div>'
-            f'<div class="bar"><i style="width:{s["conf"]:.0f}%;background:{col}"></i></div>'
-            f'<div class="sig-conf">الثقة {s["conf"]:.0f}% — {s["ai_reason"]} — R:R {s["rr"]:.1f}</div>{rows}</div>')
-
-def signals_df(sigs: list) -> pd.DataFrame:
-    return pd.DataFrame([{
-        "العملة": s["base"], "الصفقة": "🟢 شراء" if s["side"] == "LONG" else "🔴 بيع", "النوع": s["kind_label"],
-        "الاستراتيجية": s["label"], "الثقة": round(s["conf"]), "الدخول": fp(s["entry"]), "وقف الخسارة": fp(s["sl"]),
-        "الهدف 1": fp(s["tps"][0]), "الهدف 2": fp(s["tps"][1]), "الهدف 3": fp(s["tps"][2]), "R:R": round(s["rr"], 1),
-        "ملاحظة AI": s["ai_reason"], "RSI": round(s["rsi"]), "24س %": round(s["chg"], 2)} for s in sigs])
-
-def build_chart(d: pd.DataFrame, sig: dict | None, show: list, bars: int):
-    d = d.tail(bars)
-    x = d.Timestamp
-    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.015, row_heights=[0.55, 0.12, 0.16, 0.17])
-    
-    fig.add_trace(go.Candlestick(x=x, open=d.Open, high=d.High, low=d.Low, close=d.Close, name="السعر",
-                                 increasing_line_color=UP, decreasing_line_color=DOWN), 1, 1)
-
-    lines = {"EMA 21": ("EMA21", "#fcd535"), "EMA 50": ("EMA50", "#5b9cf6"), "EMA 200": ("EMA200", "#c084fc"), "VWAP": ("VWAP", "#f59e0b")}
-    for name, (col, color) in lines.items():
-        if name in show: fig.add_trace(go.Scatter(x=x, y=d[col], name=name, line=dict(color=color, width=1.2)), 1, 1)
-
-    if "القاع المحمي (Protected Low)" in show:
-        fig.add_trace(go.Scatter(x=x, y=d["Protected_Low"], name="القاع المحمي", line=dict(color="#00e676", width=2, dash="dash")), 1, 1)
-        fig.add_trace(go.Scatter(x=x, y=d["Protected_High"], name="القمة المحمية", line=dict(color="#ff1744", width=2, dash="dash")), 1, 1)
-
-    if "📐 خطوط الاتجاه والمثلثات (Trendlines)" in show:
-        fig.add_trace(go.Scatter(x=x, y=d["Trend_Res"], name="خط المقاومة (Trendline)", line=dict(color="#ff5252", width=1.8, dash="dot")), 1, 1)
-        fig.add_trace(go.Scatter(x=x, y=d["Trend_Sup"], name="خط الدعم (Trendline)", line=dict(color="#69f0ae", width=1.8, dash="dot")), 1, 1)
-
-    if "مؤشر POC & Volume Profile" in show:
-        bins_p, vol_p, poc_p, va_p = calc_volume_profile(d, bins=25)
-        if poc_p:
-            fig.add_hline(y=poc_p, line_color="#ff9900", line_dash="solid", line_width=2,
-                          annotation_text=f"POC: {fp(poc_p)}", annotation_position="left", row=1, col=1)
-
-    fig.add_trace(go.Bar(x=x, y=d.Volume, marker_color=np.where(d.Close >= d.Open, UP, DOWN), opacity=.55), 2, 1)
-    fig.add_trace(go.Scatter(x=x, y=d.RSI, name="RSI", line=dict(color="#c084fc", width=1.3)), 3, 1)
-    fig.add_trace(go.Bar(x=x, y=d.MACDh, marker_color=np.where(d.MACDh >= 0, UP, DOWN)), 4, 1)
-
-    fig.update_layout(height=780, template="plotly_dark", paper_bgcolor=BG, plot_bgcolor=BG, showlegend=False,
-                      margin=dict(l=8, r=90, t=8, b=8), hovermode="x unified")
-    fig.update_xaxes(rangeslider_visible=False, gridcolor="#1a1f25")
-    fig.update_yaxes(gridcolor="#1a1f25", side="right")
-    return fig
-
-def sidebar():
-    sb = st.sidebar
-    sb.markdown('<div class="brand">NEXUS<span>AUTONOMOUS</span></div>', unsafe_allow_html=True)
-    demo = sb.toggle("وضع المحاكاة", value=ccxt is None, key="demo")
-    mk = "futures" if sb.radio("السوق", ["فوري Spot", "عقود Futures"], horizontal=True, key="mk").startswith("عقود") else "spot"
-    tf = sb.selectbox("الإطار الزمني", list(TF_SEC)[:-1], index=3, key="tf")
-    min_vol = sb.select_slider("أدنى حجم 24س ($)", [1e5, 5e5, 1e6, 5e6, 1e7, 5e7], value=5e6, format_func=fv, key="minvol")
-    limit = sb.slider("عدد العملات للمسح", 10, 750, 50, step=10, key="limit")
-    strats = sb.multiselect("الاستراتيجيات", list(STRATS), default=list(STRATS), format_func=lambda k: STRATS[k].label, key="strats")
-    min_conf = sb.slider("أدنى ثقة للإشارة %", 50, 90, 65, key="minconf")
-    htf = sb.toggle("فلتر الاتجاه الفريم الأعلى", value=True, key="htf")
-    ml = sb.toggle("تأكيد الذكاء الاصطناعي الذاتي", value=True, key="ml")
-    sb.markdown("---")
-    auto = sb.toggle("تشغيل التداول التلقائي", value=False, key="auto")
-    max_trades = sb.slider("الصفقات المتزامنة", 1, 6, 3, key="maxtr")
-    risk = sb.slider("المخاطرة %", 0.25, 5.0, 1.0, step=0.25, key="risk")
-    lev = sb.slider("الرافعة", 1, 20, 3, key="lev") if mk == "futures" else 1
-    a_conf = sb.slider("أدنى ثقة للتلقائي %", 50, 95, 70, key="aconf")
-    scan_min = sb.slider("إعادة المسح (دقيقة)", 1, 30, 5, key="scanmin")
-    refresh = sb.slider("تحديث الأسعار (ثانية)", 3, 30, 5, key="refresh")
-    cool = sb.slider("تبريد العملة (دقيقة)", 0, 120, 30, key="cool")
-    start = sb.number_input("رصيد البداية ($)", 100.0, 10_000_000.0, 10000.0, step=500.0, key="start")
-    if sb.button("إعادة ضبط المحفظة"):
-        st.session_state.acct = new_acct(start)
-        save_acct(st.session_state.acct)
-        st.rerun()
-    cfg = {"mk": mk, "tf": tf, "min_vol": min_vol, "limit": limit, "strats": strats or list(STRATS),
-           "min_conf": min_conf, "htf": htf, "ml": ml, "demo": demo}
-    A = {"auto": auto, "max_trades": max_trades, "risk": risk, "lev": lev, "min_conf": a_conf, "scan_min": scan_min,
-         "refresh": refresh, "cool": cool, "fee": 0.0005 if mk == "futures" else 0.001, "start": start}
-    return cfg, A
-
-def tab_scanner(hub, cfg):
-    c1, c2 = st.columns([1, 3])
-    if c1.button("🚀 ابدأ مسح الذكاء الاصطناعي", type="primary"):
-        t0, bar = time.time(), st.progress(0.0)
-        sigs, tot = run_scan(hub, cfg, lambda p: bar.progress(min(p, 1.0)))
-        bar.empty()
-        st.session_state.signals = sigs
-        st.session_state.scan_info = {"total": tot, "time": time.time(), "sec": time.time() - t0}
-    sigs = st.session_state.get("signals")
-    if not sigs:
-        c2.markdown('<div class="note">اضغط «ابدأ المسح» للبحث الذاتي عن أفضل الصفقات.</div>', unsafe_allow_html=True)
-        return
-    st.markdown("#### الصفقات الموصى بها")
-    cols = st.columns(4)
-    for col, s in zip(cols, sigs[:8]): col.markdown(card_html(s), unsafe_allow_html=True)
-    st.markdown("#### جدول الصفقات المكتشفة")
-    df = signals_df(sigs)
-    show_df(df, column_config={"الثقة": st.column_config.ProgressColumn("الثقة", min_value=0, max_value=100, format="%d%%")})
-
-def render_account(hub, cfg, A):
-    a, px = st.session_state.acct, st.session_state.get("last_px", {})
-    S = acct_stats(a, px)
-    m = st.columns(6)
-    m[0].metric("الرصيد الكلي", f"${S['equity']:,.2f}", f"{S['total']:+,.2f}$")
-    m[1].metric("ربح الصفقات المفتوحة", f"${S['unreal']:+,.2f}")
-    m[2].metric("نسبة الربح", f"{S['wr']:.0f}%", f"{S['n']} صفقة")
-    m[3].metric("معامل الربح", f"{S['pf']:.2f}")
-    m[4].metric("أقصى تراجع", f"{S['dd']:.2f}%")
-    m[5].metric("الحالة", "يعمل ✅" if A["auto"] else "متوقف ⏸")
-
-    if a["positions"]:
-        rows = []
-        for p in a["positions"]:
-            cur = px.get(p["symbol"], p["entry"])
-            pnl = p["realized"] + p["side"] * (cur - p["entry"]) * p["qty"] * p["rem"]
-            rows.append({"العملة": p["symbol"].split("/")[0], "الصفقة": "🟢 شراء" if p["side"] == 1 else "🔴 بيع",
-                         "النوع": p["kind_label"], "الاستراتيجية": p["label"], "الدخول": fp(p["entry"]),
-                         "السعر الحالي": fp(cur), "الربح $": round(pnl, 2), "الوقف": fp(p["sl"]), "TP1": fp(p["tps"][0])})
-        show_df(pd.DataFrame(rows))
-
-def tab_auto(hub, cfg, A):
-    @st.fragment(run_every=A["refresh"] if A["auto"] else None)
-    def panel():
-        engine_step(hub, cfg, A)
-        render_account(hub, cfg, A)
-    panel()
-
-def tab_chart(hub, cfg):
-    sigs = st.session_state.get("signals") or []
-    uni = [s for s, _ in hub.universe(cfg["mk"], cfg["min_vol"])]
-    opts = list(dict.fromkeys([s["symbol"] for s in sigs] + uni)) or [Hub.sym(cfg["mk"], "BTC")]
-    c1, c2, c3 = st.columns([1.2, 1, 3])
-    sym = c1.selectbox("العملة", opts, format_func=lambda s: s.split("/")[0], key="ch_sym")
-    tf = c2.selectbox("الإطار", list(TF_SEC), index=list(TF_SEC).index(cfg["tf"]), key="ch_tf")
-    show = c3.multiselect("الطبقات", ["EMA 21", "EMA 50", "EMA 200", "VWAP", "إشارات", "مستويات الصفقة", "مؤشر POC & Volume Profile", "القاع المحمي (Protected Low)", "📐 خطوط الاتجاه والمثلثات (Trendlines)"],
-                          default=["EMA 21", "مؤشر POC & Volume Profile", "القاع المحمي (Protected Low)", "📐 خطوط الاتجاه والمثلثات (Trendlines)"], key="ch_show")
-    df = hub.ohlcv(cfg["mk"], sym, tf, 300)
-    if df is not None and len(df) > 50:
-        d = add_indicators(df)
-        sig = next((s for s in sigs if s["symbol"] == sym), None) or analyze_symbol(hub, cfg, sym)
-        m = st.columns(6)
-        m[0].metric("السعر", fp(d.Close.iloc[-1]))
-        m[1].metric("القاع المحمي", fp(d.Protected_Low.iloc[-1]))
-        m[2].metric("القمة المحمية", fp(d.Protected_High.iloc[-1]))
-        m[3].metric("RSI", f"{d.RSI.iloc[-2]:.0f}")
-        m[4].metric("ADX", f"{d.ADX.iloc[-2]:.0f}")
-        m[5].metric("الهيكل", "صاعد 🟢" if d.Is_Above_Protected_Low.iloc[-1] else "هابط 🔴")
-        show_plot(build_chart(d, sig, show, bars=st.slider("عدد الشموع", 60, 300, 150)))
-
-def tab_market(hub, cfg):
-    tk = hub.tickers(cfg["mk"])
-    uni = hub.universe(cfg["mk"], cfg["min_vol"])
-    if uni:
-        df = pd.DataFrame([{"العملة": s.split("/")[0], "السعر": tk[s].get("last"), "24س %": round(tk[s].get("percentage") or 0, 2), "الحجم": tk[s]["quoteVolume"]} for s, _ in uni])
-        top = df.nlargest(60, "الحجم")
-        fig = go.Figure(go.Treemap(labels=top["العملة"], parents=[""] * len(top), values=top["الحجم"], text=[f"{v:+.2f}%" for v in top["24س %"]], textinfo="label+text", marker=dict(colors=top["24س %"], colorscale=[[0, DOWN], [0.5, "#2b3139"], [1, UP]], cmid=0)))
-        fig.update_layout(height=480, template="plotly_dark", paper_bgcolor=BG, margin=dict(l=0, r=0, t=8, b=0))
-        st.markdown("#### الخريطة الحرارية للسوق")
-        show_plot(fig)
-
-def tab_backtest(hub, cfg):
-    uni = [s for s, _ in hub.universe(cfg["mk"], cfg["min_vol"])] or [Hub.sym(cfg["mk"], "BTC")]
-    c = st.columns(4)
-    sym = c[0].selectbox("العملة", uni, format_func=lambda s: s.split("/")[0], key="bt_sym")
-    tf = c[1].selectbox("الإطار", list(TF_SEC), index=list(TF_SEC).index(cfg["tf"]), key="bt_tf")
-    risk = c[2].slider("المخاطرة %", 0.25, 5.0, 1.0, key="bt_risk")
-    conf = c[3].slider("أدنى ثقة %", 50, 90, cfg["min_conf"], key="bt_conf")
-    if st.button("▶️ تشغيل الباك تست", type="primary"):
-        df = hub.ohlcv(cfg["mk"], sym, tf, 1000)
-        if df is not None:
-            d = add_indicators(df)
-            trades, curve = run_backtest(d, list(STRATS), conf, risk, 0.0005)
-            if trades:
-                t = pd.DataFrame(trades)
-                st.success(f"تم تنفيذ {len(t)} صفقة | نسبة النجاح: {(t.R > 0).mean()*100:.0f}%")
-                show_df(t.iloc[::-1])
-
-def tab_calc():
-    c = st.columns(4)
-    side = c[0].radio("الصفقة", ["شراء", "بيع"], horizontal=True)
-    bal = c[1].number_input("الرصيد ($)", 10.0, 1e8, 10000.0)
-    risk = c[2].number_input("المخاطرة %", 0.1, 20.0, 1.0)
-    lev = c[3].number_input("الرافعة", 1, 125, 5)
-    c2 = st.columns(2)
-    entry = c2[0].number_input("سعر الدخول", 0.0, 1e9, 100.0)
-    sl = c2[1].number_input("وقف الخسارة", 0.0, 1e9, 97.0)
-    dist = abs(entry - sl)
-    if entry > 0 and dist > 0:
-        risk_amt = bal * risk / 100
-        notional = risk_amt / (dist / entry)
-        st.info(f"المبلغ المعرض للخسارة: **${risk_amt:,.2f}** | حجم المركز: **${notional:,.2f}** | الهامش المطلوب: **${notional/lev:,.2f}**")
-
-def main():
-    st.set_page_config(page_title="NEXUS Terminal Autonomous", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
-    ensure_theme()
-    st.markdown(CSS, unsafe_allow_html=True)
-    cfg, A = sidebar()
-    hub = get_hub(cfg["demo"])
-    if "acct" not in st.session_state: st.session_state.acct = load_acct(A["start"])
-
-    tk = hub.tickers(cfg["mk"])
-    cols = st.columns(5)
-    for col, b in zip(cols, ["BTC", "ETH", "BNB", "SOL", "XRP"]):
-        t = tk.get(Hub.sym(cfg["mk"], b))
-        if t: col.metric(f"{b}/USDT", fp(t.get("last")), f"{(t.get('percentage') or 0):+.2f}%")
-
-    tabs = st.tabs(["📡 الماسح", "🤖 التداول التلقائي", "📈 الشارت", "🌍 السوق", "🧪 باك تست", "🧮 المخاطر"])
-    with tabs[0]: tab_scanner(hub, cfg)
-    with tabs[1]: tab_auto(hub, cfg, A)
-    with tabs[2]: tab_chart(hub, cfg)
-    with tabs[3]: tab_market(hub, cfg)
-    with tabs[4]: tab_backtest(hub, cfg)
-    with tabs[5]: tab_calc()
-
-if __name__ == "__main__":
-    main()
+    eqs = [e[1] for e in
