@@ -520,4 +520,623 @@ STRATS = {s.key: s for s in [
     Strat("trendline_break", "📐 كسر خط الاتجاه والمثلثات", "trend", s_trendline_breakout, 1.5, (2.0, 3.8, 5.5)),
     Strat("prot_low", "🛡 الارتداد من القاع المحمي", "reversal", s_protected_low, 1.2, (2.0, 3.5, 5.5)),
     Strat("scalp", "⚡ مضاربة سريعة EMA/VWAP", "scalp", s_scalp, 1.0, (1.0, 1.8, 3.0)),
-    Strat("wick_scalp", "⚡ اختراق ذيل 1H (5m)", "scalp", s_wick_scalp, 1.2, (1.5, 2.
+    Strat("wick_scalp", "⚡ اختراق ذيل 1H (5m)", "scalp", s_wick_scalp, 1.2, (1.5, 2.5, 4.0)),
+    Strat("bottom", "🟢 اقتناص القاع (Discount)", "reversal", s_bottom, 1.5, (2.0, 3.5, 5.0)),
+    Strat("top", "🔴 اقتناص القمة (Premium)", "reversal", s_top, 1.5, (2.0, 3.5, 5.0)),
+    Strat("hunter", "🏹 الصياد ICT Turtle Soup", "reversal", s_hunter, 1.3, (1.8, 3.0, 4.5)),
+    Strat("ict_short_sweep", "🏹 اقتناص الشورت المتقدم (ICT Short Sweep)", "reversal", s_ict_short_sweep, 1.2, (1.8, 3.2, 5.0)),
+    Strat("smc", "🧠 المال الذكي ICT (FVG+BOS)", "trend", s_smc, 1.5, (2.0, 3.5, 5.0)),
+    Strat("wick_break", "💥 اختراق ذيل 4H (15m)", "trend", s_wick_breakout, 1.5, (2.0, 3.5, 5.0)),
+    Strat("wick_swing", "🏆 اختراق ذيل 1D (4H)", "trend", s_wick_swing, 1.8, (2.5, 4.5, 6.5)),
+    Strat("poc_rebound", "🎯 التداول على مستوى POC", "trend", s_poc_rebound, 1.4, (1.8, 3.0, 4.8)),
+    Strat("wyckoff", "🌀 وايكوف Spring/Upthrust", "reversal", s_wyckoff, 1.6, (2.0, 3.5, 5.5)),
+    Strat("break", "🚀 اختراق الاتجاه BOS", "trend", s_break, 1.8, (2.0, 4.0, 6.0)),
+]}
+
+def kind_label(key: str, side: str) -> str:
+    k = STRATS[key].kind
+    if k == "scalp": return "⚡ مضاربة سريعة"
+    if k == "trend": return "📈 تتبّع اتجاه"
+    return "🟢 اقتناص قاع" if side == "LONG" else "🔴 اقتناص قمة"
+
+def tf_duration_label(tf: str) -> str:
+    if tf in ["1m", "3m", "5m"]: return "⚡ صفقة خاطفة (Scalp)"
+    if tf in ["15m", "30m", "1h"]: return "📈 صفقة متوسطة (Intraday)"
+    return "🏆 صفقة طويلة (Swing)"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# محرك الذكاء الاصطناعي الذاتي وتفحص البيتكوين
+# ──────────────────────────────────────────────────────────────────────────────
+def check_btc_regime(hub: Hub, mk: str) -> str:
+    btc_sym = Hub.sym(mk, "BTC")
+    df = hub.ohlcv(mk, btc_sym, "1h", limit=100)
+    if df is None or len(df) < 50: return "NEUTRAL"
+    c = df["Close"]
+    ema50 = c.ewm(span=50, adjust=False).mean().iloc[-1]
+    last = c.iloc[-1]
+    if last > ema50 * 1.005: return "BULLISH"
+    elif last < ema50 * 0.995: return "BEARISH"
+    return "NEUTRAL"
+
+def autonomous_ai_confirmation(sym: str, side: str, price: float, rsi: float, volr: float, score: float, 
+                               rsi_htf: float = 50.0, low_wick: float = 0.0, price_to_support_pct: float = 1.0,
+                               btc_regime: str = "NEUTRAL") -> tuple[float, str]:
+    ai_boost = 0.0
+    reason = "مؤشرات فنية قياسية"
+
+    if btc_regime == "BEARISH" and side == "LONG":
+        return max(score - 30.0, 0.0), "⚠️ تحذير AI: اتجاه البيتكوين هابط عاماً"
+    if btc_regime == "BULLISH" and side == "SHORT":
+        return max(score - 30.0, 0.0), "⚠️ تحذير AI: اتجاه البيتكوين صاعد عاماً"
+
+    if volr > 4.0:
+        return max(score - 20.0, 0.0), "⚠️ تحذير AI: شمعة تصفية حادة (Liquidation Sweep)"
+
+    if side == "SHORT":
+        if rsi_htf < 38 or rsi < 36:
+            return max(score - 35.0, 0.0), "⚠️ تحذير AI: تشبع بيعي حاد - خطر ارتداد"
+        if price_to_support_pct < 0.006:
+            return max(score - 25.0, 0.0), "⚠️ تحذير AI: السعر يتداول فوق دعم رئيسي"
+    if side == "LONG":
+        if rsi_htf > 68 or rsi > 70:
+            return max(score - 35.0, 0.0), "⚠️ تحذير AI: تشبع شرائي حاد - خطر جني أرباح"
+
+    if side == "LONG" and rsi < 45 and volr > 1.4:
+        ai_boost += 8.0
+        reason = "تأكيد AI: تجميع عند القاع"
+    elif side == "SHORT" and rsi > 65 and volr > 1.4:
+        ai_boost += 8.0
+        reason = "تأكيد AI: تصريف وحماية قمة"
+
+    final_score = np.clip(score + ai_boost, 0, 99)
+    return float(final_score), reason
+
+def ml_prob(d: pd.DataFrame):
+    if RandomForestClassifier is None: return None
+    X = pd.DataFrame({"rsi": d.RSI, "macd": d.MACDh / d.Close, "vol": d.VolR, "adx": d.ADX}).replace([np.inf, -np.inf], np.nan)
+    n = len(d)
+    y = (d.Close.shift(-3) > d.Close).astype(int).values
+    ok = X.notna().all(axis=1).values
+    train = ok & (np.arange(n) <= n - 10)
+    if train.sum() < 80 or not ok[-2]: return None
+    try:
+        m = RandomForestClassifier(n_estimators=50, max_depth=4, min_samples_leaf=5, random_state=42, n_jobs=1)
+        m.fit(X.values[train], y[train])
+        return float(m.predict_proba(X.values[[n - 2]])[0][1])
+    except Exception: return None
+
+def analyze_symbol_tf(hub: Hub, cfg: dict, sym: str, tf: str, tk: dict | None = None, btc_regime: str = "NEUTRAL"):
+    mk = cfg["mk"]
+    df = hub.ohlcv(mk, sym, tf, 300)
+    if df is None or len(df) < 150: return None
+    d = add_indicators(df)
+    i = -2
+    price, atr = float(d.Close.iloc[-1]), float(d.ATR.iloc[i])
+    if not np.isfinite(atr) or atr <= 0 or price <= 0: return None
+    
+    hits = []
+    for key in cfg["strats"]:
+        lo, sh, sl_, ss_ = STRATS[key].fn(d)
+        if bool(lo.iloc[i]): hits.append((key, "LONG", float(sl_.iloc[i])))
+        if bool(sh.iloc[i]): hits.append((key, "SHORT", float(ss_.iloc[i])))
+    if not hits: return None
+    
+    key, side, score = max(hits, key=lambda h: h[2])
+
+    rsi_htf = 50.0
+    hd = hub.ohlcv(mk, sym, HTF_MAP.get(tf, "1h"), 120)
+    if hd is not None and len(hd) > 60:
+        hd_ind = add_indicators(hd)
+        rsi_htf = float(hd_ind.RSI.iloc[-2])
+
+    recent_low = float(d.Low.iloc[-30:-1].min())
+    price_to_support_pct = (price - recent_low) / max(price, 1e-8)
+    low_wick_now = float(d.LowWick.iloc[i])
+
+    rsi_now, vol_now = float(d.RSI.iloc[i]), float(d.VolR.iloc[i])
+    score, ai_reason = autonomous_ai_confirmation(
+        sym, side, price, rsi_now, vol_now, score,
+        rsi_htf=rsi_htf, low_wick=low_wick_now, price_to_support_pct=price_to_support_pct,
+        btc_regime=btc_regime
+    )
+
+    htf = None
+    if cfg.get("htf") and hd is not None and len(hd) > 60:
+        up = float(hd.Close.iloc[-1]) > float(hd.Close.ewm(span=50, adjust=False).mean().iloc[-1])
+        htf = "صاعد" if up else "هابط"
+
+    ml = None
+    if cfg.get("ml"):
+        p = ml_prob(d)
+        if p is not None:
+            ml = p if side == "LONG" else 1 - p
+            score = 0.8 * score + 0.2 * ml * 100
+
+    S = STRATS[key]
+    sg = 1 if side == "LONG" else -1
+    entry_price = price
+    sl = entry_price - sg * S.sl * atr
+    dist_sl = abs(entry_price - sl)
+    
+    tp1 = entry_price + sg * S.tps[0] * atr
+    tp2 = entry_price + sg * S.tps[1] * atr
+    tp3 = entry_price + sg * S.tps[2] * atr
+
+    return {
+        "symbol": sym, "base": sym.split("/")[0], "mk": mk, "tf": tf, "side": side, "key": key, "label": S.label,
+        "kind_label": kind_label(key, side), "tf_desc": tf_duration_label(tf), "conf": float(np.clip(score, 0, 99)),
+        "agree": len(hits), "entry": entry_price, "sl": sl, "tps": [tp1, tp2, tp3],
+        "rr": abs(tp2 - entry_price) / max(dist_sl, 1e-8), "atr": atr, "slm": S.sl, "tpm": list(S.tps),
+        "rsi": rsi_now, "adx": float(d.ADX.iloc[i]), "volr": vol_now, "chg": float((tk or {}).get("percentage") or 0),
+        "vol24": float((tk or {}).get("quoteVolume") or 0), "ml": ml, "htf": htf,
+        "ai_reason": ai_reason, "prot_low": float(d.Protected_Low.iloc[-1] or 0), "ts": time.time(),
+    }
+
+def analyze_symbol_all_tfs(hub: Hub, cfg: dict, sym: str, tk: dict | None = None, btc_regime: str = "NEUTRAL"):
+    target_tfs = cfg.get("scan_tfs", ["1m", "5m", "15m", "1h", "4h", "1d"])
+    best_sig = None
+    for tf in target_tfs:
+        res = analyze_symbol_tf(hub, cfg, sym, tf, tk, btc_regime)
+        if res:
+            if best_sig is None or res["conf"] > best_sig["conf"]:
+                best_sig = res
+    return best_sig
+
+def run_scan(hub: Hub, cfg: dict, progress=None):
+    sort_asc = cfg.get("sort_order") == "من الأدنى إلى الأعلى"
+    uni = hub.universe(cfg["mk"], cfg["min_vol"], sort_asc=sort_asc)[:cfg["limit"]]
+    tick = hub.tickers(cfg["mk"])
+    btc_regime = check_btc_regime(hub, cfg["mk"])
+    out, done = [], 0
+    if not uni: return out, 0
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        futs = {ex.submit(analyze_symbol_all_tfs, hub, cfg, s, tick.get(s), btc_regime): s for s, _ in uni}
+        for f in as_completed(futs):
+            done += 1
+            try: r = f.result()
+            except Exception: r = None
+            if r and r["conf"] >= cfg.get("min_conf", 60): out.append(r)
+            if progress: progress(done / len(uni))
+    out.sort(key=lambda s: -s["conf"])
+    return out, len(uni)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# التداول التلقائي وإدارة الحجم والوقف المتحرك
+# ──────────────────────────────────────────────────────────────────────────────
+def calculate_dynamic_position_size(balance: float, risk_pct: float, entry: float, sl: float, atr: float, max_lev: int = 5) -> dict:
+    dist_sl_pct = abs(entry - sl) / entry
+    if dist_sl_pct == 0: return {"notional": 0, "qty": 0, "margin": 0}
+    
+    risk_amount = balance * (risk_pct / 100.0)
+    notional = risk_amount / dist_sl_pct
+    
+    volatility_ratio = atr / entry
+    if volatility_ratio > 0.03:
+        notional *= (0.03 / volatility_ratio)
+        
+    required_margin = notional / max_lev
+    if required_margin > balance * 0.3:
+        notional = balance * 0.3 * max_lev
+
+    return {"notional": notional, "qty": notional / entry, "margin": notional / max_lev}
+
+def advance(p: dict, low: float, high: float, atr: float = 0.0) -> list:
+    ev, hit_tp, s = [], False, p["side"]
+    
+    if p["stage"] >= 1 and atr > 0:
+        if s == 1: p["sl"] = max(p["sl"], high - 1.5 * atr)
+        else: p["sl"] = min(p["sl"], low + 1.5 * atr)
+
+    while p["rem"] > 1e-9:
+        if not hit_tp and ((s == 1 and low <= p["sl"]) or (s == -1 and high >= p["sl"])):
+            ev.append((p["sl"], p["rem"], ("SL", "BE", "TRAIL")[min(p["stage"], 2)]))
+            p["rem"] = 0.0
+            break
+        if p["stage"] >= 3:
+            p["rem"] = 0.0
+            break
+        tp = p["tps"][p["stage"]]
+        if not ((s == 1 and high >= tp) or (s == -1 and low <= tp)): break
+        frac = p["rem"] if p["stage"] == 2 else min(SPLITS[p["stage"]], p["rem"])
+        ev.append((tp, frac, f"TP{p['stage'] + 1}"))
+        p["rem"] -= frac
+        p["stage"] += 1
+        hit_tp = True
+        if p["stage"] == 1: p["sl"] = p["entry"]
+        elif p["stage"] == 2: p["sl"] = p["tps"][0]
+    return ev
+
+def run_backtest(d: pd.DataFrame, keys: list, min_conf: float, risk_pct: float, fee: float, slippage: float = 0.0008):
+    n = len(d)
+    best, side, kk = np.zeros(n), np.zeros(n, dtype=int), [""] * n
+    for key in keys:
+        lo, sh, sl_, ss_ = STRATS[key].fn(d)
+        for m, s, sg in ((lo, 1, sl_), (sh, -1, ss_)):
+            v = sg.values.astype(float)
+            upd = m.values & (v >= min_conf) & (v > best)
+            best = np.where(upd, v, best)
+            side = np.where(upd, s, side)
+            for i in np.where(upd)[0]: kk[i] = key
+    o, h, l, c, atr = (d[x].values for x in ("Open", "High", "Low", "Close", "ATR"))
+    eq, curve, trades, i = 1.0, [(d.Timestamp.iloc[0], 1.0)], [], 60
+    while i < n - 2:
+        if side[i] == 0 or not atr[i] > 0:
+            i += 1
+            continue
+        S, sd = STRATS[kk[i]], int(side[i])
+        entry = o[i + 1] * (1 + sd * slippage)
+        sl = entry - sd * S.sl * atr[i]
+        p = {"side": sd, "entry": entry, "sl": sl, "tps": [entry + sd * m * atr[i] for m in S.tps], "stage": 0, "rem": 1.0}
+        risk, R, j, exit_j = abs(entry - sl), 0.0, i + 1, n - 1
+        while j < n:
+            for pr, fr, _ in advance(p, l[j], h[j], atr[j]): R += fr * sd * (pr - entry) / risk
+            if p["rem"] <= 1e-9:
+                exit_j = j
+                break
+            j += 1
+        else: R += p["rem"] * sd * (c[-1] - entry) / risk
+        R -= 2 * (fee + slippage) * entry / risk
+        eq = max(eq * (1 + risk_pct / 100 * R), 0.0)
+        trades.append({"الوقت": d.Timestamp.iloc[i + 1], "الصفقة": "شراء" if sd == 1 else "بيع",
+                       "الاستراتيجية": S.label, "الدخول": entry, "R": round(R, 2), "الشموع": exit_j - i})
+        curve.append((d.Timestamp.iloc[exit_j], eq))
+        i = exit_j + 1
+    return trades, curve
+
+def new_acct(bal: float) -> dict:
+    return {"start": bal, "balance": bal, "positions": [], "history": [], "equity": [], "last_scan": 0.0, "cooldown": {}, "pid": 0}
+
+def load_acct(bal: float) -> dict:
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f: a = json.load(f)
+        if isinstance(a, dict) and "balance" in a:
+            for k, v in new_acct(bal).items(): a.setdefault(k, v)
+            return a
+    except Exception: pass
+    return new_acct(bal)
+
+def save_acct(a: dict):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f: json.dump(a, f, ensure_ascii=False, default=float)
+    except Exception: pass
+
+def apply_fills(a: dict, p: dict, events: list, fee: float):
+    for price, frac, reason in events:
+        q = p["qty"] * frac
+        pnl = p["side"] * (price - p["entry"]) * q - fee * price * q
+        a["balance"] += pnl
+        p["realized"] += pnl
+        p["fills"].append([price, frac, reason, time.time()])
+
+def finalize(a: dict, p: dict, cool_min: float):
+    tot = sum(f[1] for f in p["fills"]) or 1
+    avg_exit = sum(f[0] * f[1] for f in p["fills"]) / tot
+    a["history"].append({
+        "closed": time.time(), "opened": p["opened"], "symbol": p["symbol"], "side": p["side"], "label": p["label"],
+        "kind": p["kind_label"], "conf": p["conf"], "entry": p["entry"], "exit": avg_exit, "pnl": p["realized"],
+        "pct": p["realized"] / p["notional"] * 100, "reason": p["fills"][-1][2] if p["fills"] else "-"})
+    a["history"] = a["history"][-500:]
+    a["cooldown"][p["symbol"]] = time.time() + cool_min * 60
+    a["positions"] = [x for x in a["positions"] if x["id"] != p["id"]]
+
+def open_position(a: dict, s: dict, price: float, A: dict) -> dict:
+    sg = 1 if s["side"] == "LONG" else -1
+    sl = price - sg * s["slm"] * s["atr"]
+    pos_data = calculate_dynamic_position_size(a["balance"], A["risk"], price, sl, s["atr"], A["lev"])
+    notional = pos_data["notional"]
+    fee = A["fee"] * notional
+    a["balance"] -= fee
+    a["pid"] += 1
+    p = {"id": a["pid"], "symbol": s["symbol"], "mk": s["mk"], "side": sg, "key": s["key"], "label": s["label"],
+         "kind_label": s["kind_label"], "conf": s["conf"], "entry": price, "sl": sl, "tps": s["tps"], "stage": 0,
+         "rem": 1.0, "qty": pos_data["qty"], "notional": notional, "opened": time.time(), "realized": -fee, "fills": [], "atr": s["atr"]}
+    a["positions"].append(p)
+    return p
+
+def unrealized(a: dict, px: dict) -> float:
+    return sum(p["side"] * (px.get(p["symbol"], p["entry"]) - p["entry"]) * p["qty"] * p["rem"] for p in a["positions"])
+
+def engine_step(hub: Hub, cfg: dict, A: dict):
+    a, now = st.session_state.acct, time.time()
+    changed = False
+    px = st.session_state.setdefault("last_px", {})
+    for mk in {p["mk"] for p in a["positions"]}: px.update(hub.prices(mk, [p["symbol"] for p in a["positions"] if p["mk"] == mk]))
+    for p in list(a["positions"]):
+        price = px.get(p["symbol"])
+        if not price: continue
+        ev = advance(p, price, price, p.get("atr", 0.0))
+        if ev:
+            apply_fills(a, p, ev, A["fee"])
+            changed = True
+            st.toast(f"{p['symbol'].split('/')[0]}: {ev[-1][2]} عند {fp(ev[-1][0])}", icon="🎯" if ev[-1][2].startswith("TP") else "🛑")
+        if p["rem"] <= 1e-9: finalize(a, p, A["cool"])
+    if A["auto"] and len(a["positions"]) < A["max_trades"]:
+        if now - a["last_scan"] > A["scan_min"] * 60 or not st.session_state.get("signals"):
+            with st.spinner("مسح الذكاء الاصطناعي للسوق..."): sigs, tot = run_scan(hub, cfg)
+            st.session_state.signals, st.session_state.scan_info = sigs, {"total": tot, "time": time.time()}
+            a["last_scan"], changed = time.time(), True
+        open_syms = {p["symbol"] for p in a["positions"]}
+        for s in st.session_state.get("signals", []):
+            if len(a["positions"]) >= A["max_trades"]: break
+            if s["symbol"] in open_syms or a["cooldown"].get(s["symbol"], 0) > now or s["conf"] < A["min_conf"]: continue
+            if s["mk"] == "spot" and s["side"] == "SHORT": continue
+            price = hub.prices(s["mk"], [s["symbol"]]).get(s["symbol"])
+            if not price: continue
+            p = open_position(a, s, price, A)
+            open_syms.add(s["symbol"])
+            px[s["symbol"]], changed = price, True
+            st.toast(f"صفقة جديدة: {s['base']} {'شراء' if p['side'] == 1 else 'بيع'} — {s['kind_label']}", icon="🚀")
+    eq = a["balance"] + unrealized(a, px)
+    if not a["equity"] or now - a["equity"][-1][0] > 10:
+        a["equity"].append([now, eq])
+        a["equity"] = a["equity"][-3000:]
+        changed = True
+    if changed: save_acct(a)
+
+def acct_stats(a: dict, px: dict) -> dict:
+    un = unrealized(a, px)
+    h = a["history"]
+    wins = [x["pnl"] for x in h if x["pnl"] > 0]
+    loss = [x["pnl"] for x in h if x["pnl"] <= 0]
+    pf = sum(wins) / abs(sum(loss)) if loss and sum(loss) != 0 else (float("inf") if wins else 0.0)
+    eqs = [e[1] for e in a["equity"]] if a.get("equity") else [a["start"]]
+    peak, dd = eqs[0], 0.0
+    for e in eqs:
+        peak = max(peak, e)
+        dd = max(dd, (peak - e) / peak * 100 if peak else 0)
+    return {"equity": a["balance"] + un, "unreal": un, "total": a["balance"] + un - a["start"],
+            "wr": len(wins) / len(h) * 100 if h else 0.0, "n": len(h), "pf": pf, "dd": dd}
+
+def card_html(s: dict) -> str:
+    long = s["side"] == "LONG"
+    col = UP if long else DOWN
+    rows = "".join(f'<div class="lv"><span>{n}</span><b>{fp(v)}</b></div>' for n, v in
+                   (("دخول", s["entry"]), ("وقف الخسارة", s["sl"]), ("الهدف 1", s["tps"][0]),
+                    ("الهدف 2", s["tps"][1]), ("الهدف 3", s["tps"][2])))
+    return (f'<div class="sig" style="--c:{col}"><div class="sig-top">'
+            f'<span class="sym">{s["base"]}<small>/USDT</small></span>'
+            f'<div><span class="tf-badge">{s["tf"]}</span> '
+            f'<span class="badge" style="background:{col}26;color:{col}">{"▲ شراء" if long else "▼ بيع"}</span></div></div>'
+            f'<div class="sig-kind">{s["kind_label"]} <span style="font-size:0.75rem;color:#848e9c;">({s["tf_desc"]})</span></div>'
+            f'<div class="sig-strat">{s["label"]}</div>'
+            f'<div class="bar"><i style="width:{s["conf"]:.0f}%;background:{col}"></i></div>'
+            f'<div class="sig-conf">الثقة {s["conf"]:.0f}% — {s["ai_reason"]} — R:R {s["rr"]:.1f}</div>{rows}</div>')
+
+def signals_df(sigs: list) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "العملة": s["base"],
+        "الصفقة": "🟢 شراء" if s["side"] == "LONG" else "🔴 بيع",
+        "الفريم": s["tf"],
+        "نوع الصفقة": s["tf_desc"],
+        "النمط": s["kind_label"],
+        "الاستراتيجية": s["label"],
+        "الثقة": round(s["conf"]),
+        "الدخول": fp(s["entry"]),
+        "وقف الخسارة": fp(s["sl"]),
+        "الهدف 1": fp(s["tps"][0]),
+        "الهدف 2": fp(s["tps"][1]),
+        "الهدف 3": fp(s["tps"][2]),
+        "R:R": round(s["rr"], 1),
+        "ملاحظة AI": s["ai_reason"],
+        "حجم 24س": fv(s["vol24"]),
+        "24س %": round(s["chg"], 2)
+    } for s in sigs])
+
+def build_chart(d: pd.DataFrame, sig: dict | None, show: list, bars: int):
+    d = d.tail(bars)
+    x = d.Timestamp
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.015, row_heights=[0.55, 0.12, 0.16, 0.17])
+    
+    fig.add_trace(go.Candlestick(x=x, open=d.Open, high=d.High, low=d.Low, close=d.Close, name="السعر",
+                                 increasing_line_color=UP, decreasing_line_color=DOWN), 1, 1)
+
+    lines = {"EMA 21": ("EMA21", "#fcd535"), "EMA 50": ("EMA50", "#5b9cf6"), "EMA 200": ("EMA200", "#c084fc"), "VWAP": ("VWAP", "#f59e0b")}
+    for name, (col, color) in lines.items():
+        if name in show: fig.add_trace(go.Scatter(x=x, y=d[col], name=name, line=dict(color=color, width=1.2)), 1, 1)
+
+    if "القاع المحمي (Protected Low)" in show:
+        fig.add_trace(go.Scatter(x=x, y=d["Protected_Low"], name="القاع المحمي", line=dict(color="#00e676", width=2, dash="dash")), 1, 1)
+        fig.add_trace(go.Scatter(x=x, y=d["Protected_High"], name="القمة المحمية", line=dict(color="#ff1744", width=2, dash="dash")), 1, 1)
+
+    if "📐 خطوط الاتجاه والمثلثات (Trendlines)" in show:
+        fig.add_trace(go.Scatter(x=x, y=d["Trend_Res"], name="خط المقاومة (Trendline)", line=dict(color="#ff5252", width=1.8, dash="dot")), 1, 1)
+        fig.add_trace(go.Scatter(x=x, y=d["Trend_Sup"], name="خط الدعم (Trendline)", line=dict(color="#69f0ae", width=1.8, dash="dot")), 1, 1)
+
+    if "مؤشر POC & Volume Profile" in show:
+        bins_p, vol_p, poc_p, va_p = calc_volume_profile(d, bins=25)
+        if poc_p:
+            fig.add_hline(y=poc_p, line_color="#ff9900", line_dash="solid", line_width=2,
+                          annotation_text=f"POC: {fp(poc_p)}", annotation_position="left", row=1, col=1)
+
+    fig.add_trace(go.Bar(x=x, y=d.Volume, marker_color=np.where(d.Close >= d.Open, UP, DOWN), opacity=.55), 2, 1)
+    fig.add_trace(go.Scatter(x=x, y=d.RSI, name="RSI", line=dict(color="#c084fc", width=1.3)), 3, 1)
+    fig.add_trace(go.Bar(x=x, y=d.MACDh, marker_color=np.where(d.MACDh >= 0, UP, DOWN)), 4, 1)
+
+    fig.update_layout(height=780, template="plotly_dark", paper_bgcolor=BG, plot_bgcolor=BG, showlegend=False,
+                      margin=dict(l=8, r=90, t=8, b=8), hovermode="x unified")
+    fig.update_xaxes(rangeslider_visible=False, gridcolor="#1a1f25")
+    fig.update_yaxes(gridcolor="#1a1f25", side="right")
+    return fig
+
+def sidebar():
+    sb = st.sidebar
+    sb.markdown('<div class="brand">NEXUS<span>AUTONOMOUS</span></div>', unsafe_allow_html=True)
+    demo = sb.toggle("وضع المحاكاة", value=ccxt is None, key="demo")
+    mk = "futures" if sb.radio("السوق", ["فوري Spot", "عقود Futures"], horizontal=True, key="mk").startswith("عقود") else "spot"
+    
+    st_tfs = sb.multiselect("فريمات المسح الشامل", ["1m", "5m", "15m", "1h", "4h", "1d"], default=["1m", "5m", "15m", "1h", "4h", "1d"], key="scan_tfs")
+    tf = sb.selectbox("الإطار الزمني للشارت", list(TF_SEC)[:-1], index=3, key="tf")
+    
+    sort_order = sb.radio("ترتيب تصفية الحجم والسيولة", ["من الأعلى إلى الأدنى", "من الأدنى إلى الأعلى"], key="sort_order")
+    min_vol = sb.select_slider("أدنى حجم 24س ($)", [0.0, 1e4, 1e5, 5e5, 1e6, 5e6, 1e7, 5e7], value=1e5, format_func=fv, key="minvol")
+    limit = sb.slider("عدد العملات للمسح", 10, 1000, 750, step=25, key="limit")
+    
+    strats = sb.multiselect("الاستراتيجيات", list(STRATS), default=list(STRATS), format_func=lambda k: STRATS[k].label, key="strats")
+    min_conf = sb.slider("أدنى ثقة للإشارة %", 50, 90, 60, key="minconf")
+    htf = sb.toggle("فلتر الاتجاه الفريم الأعلى", value=True, key="htf")
+    ml = sb.toggle("تأكيد الذكاء الاصطناعي الذاتي", value=True, key="ml")
+    sb.markdown("---")
+    auto = sb.toggle("تشغيل التداول التلقائي", value=False, key="auto")
+    max_trades = sb.slider("الصفقات المتزامنة", 1, 6, 3, key="maxtr")
+    risk = sb.slider("المخاطرة %", 0.25, 5.0, 1.0, step=0.25, key="risk")
+    lev = sb.slider("الرافعة", 1, 20, 3, key="lev") if mk == "futures" else 1
+    a_conf = sb.slider("أدنى ثقة للتلقائي %", 50, 95, 70, key="aconf")
+    scan_min = sb.slider("إعادة المسح (دقيقة)", 1, 30, 5, key="scanmin")
+    refresh = sb.slider("تحديث الأسعار (ثانية)", 3, 30, 5, key="refresh")
+    cool = sb.slider("تبريد العملة (دقيقة)", 0, 120, 30, key="cool")
+    start = sb.number_input("رصيد البداية ($)", 100.0, 10_000_000.0, 10000.0, step=500.0, key="start")
+    if sb.button("إعادة ضبط المحفظة"):
+        st.session_state.acct = new_acct(start)
+        save_acct(st.session_state.acct)
+        st.rerun()
+    cfg = {"mk": mk, "tf": tf, "scan_tfs": st_tfs or ["15m"], "min_vol": min_vol, "limit": limit, "sort_order": sort_order,
+           "strats": strats or list(STRATS), "min_conf": min_conf, "htf": htf, "ml": ml, "demo": demo}
+    A = {"auto": auto, "max_trades": max_trades, "risk": risk, "lev": lev, "min_conf": a_conf, "scan_min": scan_min,
+         "refresh": refresh, "cool": cool, "fee": 0.0005 if mk == "futures" else 0.001, "start": start}
+    return cfg, A
+
+def tab_scanner(hub, cfg):
+    c1, c2 = st.columns([1, 3])
+    if c1.button("🚀 ابدأ مسح الذكاء الاصطناعي الشامل", type="primary"):
+        t0, bar = time.time(), st.progress(0.0)
+        sigs, tot = run_scan(hub, cfg, lambda p: bar.progress(min(p, 1.0)))
+        bar.empty()
+        st.session_state.signals = sigs
+        st.session_state.scan_info = {"total": tot, "time": time.time(), "sec": time.time() - t0}
+    sigs = st.session_state.get("signals")
+    if not sigs:
+        c2.markdown('<div class="note">اضغط «ابدأ المسح» للبحث عبر جميع الفريمات والعملات عن أفضل الصفقات.</div>', unsafe_allow_html=True)
+        return
+    
+    st.markdown("#### 🌟 أفضل 10 صفقات نادرة وموصى بها")
+    cols1 = st.columns(5)
+    for col, s in zip(cols1, sigs[:5]):
+        col.markdown(card_html(s), unsafe_allow_html=True)
+        
+    if len(sigs) > 5:
+        cols2 = st.columns(5)
+        for col, s in zip(cols2, sigs[5:10]):
+            col.markdown(card_html(s), unsafe_allow_html=True)
+            
+    st.markdown("---")
+    st.markdown(f"#### 📊 جميع الصفقات المكتشفة ({len(sigs)})")
+    df = signals_df(sigs)
+    show_df(df, column_config={"الثقة": st.column_config.ProgressColumn("الثقة", min_value=0, max_value=100, format="%d%%")})
+
+def render_account(hub, cfg, A):
+    a, px = st.session_state.acct, st.session_state.get("last_px", {})
+    S = acct_stats(a, px)
+    m = st.columns(6)
+    m[0].metric("الرصيد الكلي", f"${S['equity']:,.2f}", f"{S['total']:+,.2f}$")
+    m[1].metric("ربح الصفقات المفتوحة", f"${S['unreal']:+,.2f}")
+    m[2].metric("نسبة الربح", f"{S['wr']:.0f}%", f"{S['n']} صفقة")
+    m[3].metric("معامل الربح", f"{S['pf']:.2f}")
+    m[4].metric("أقصى تراجع", f"{S['dd']:.2f}%")
+    m[5].metric("الحالة", "يعمل ✅" if A["auto"] else "متوقف ⏸")
+
+    if a["positions"]:
+        rows = []
+        for p in a["positions"]:
+            cur = px.get(p["symbol"], p["entry"])
+            pnl = p["realized"] + p["side"] * (cur - p["entry"]) * p["qty"] * p["rem"]
+            rows.append({"العملة": p["symbol"].split("/")[0], "الصفقة": "🟢 شراء" if p["side"] == 1 else "🔴 بيع",
+                         "النوع": p["kind_label"], "الاستراتيجية": p["label"], "الدخول": fp(p["entry"]),
+                         "السعر الحالي": fp(cur), "الربح $": round(pnl, 2), "الوقف": fp(p["sl"]), "TP1": fp(p["tps"][0])})
+        show_df(pd.DataFrame(rows))
+
+def tab_auto(hub, cfg, A):
+    @st.fragment(run_every=A["refresh"] if A["auto"] else None)
+    def panel():
+        engine_step(hub, cfg, A)
+        render_account(hub, cfg, A)
+    panel()
+
+def tab_chart(hub, cfg):
+    sigs = st.session_state.get("signals") or []
+    uni = [s for s, _ in hub.universe(cfg["mk"], cfg["min_vol"])]
+    opts = list(dict.fromkeys([s["symbol"] for s in sigs] + uni)) or [Hub.sym(cfg["mk"], "BTC")]
+    c1, c2, c3 = st.columns([1.2, 1, 3])
+    sym = c1.selectbox("العملة", opts, format_func=lambda s: s.split("/")[0], key="ch_sym")
+    tf = c2.selectbox("الإطار", list(TF_SEC), index=list(TF_SEC).index(cfg["tf"]), key="ch_tf")
+    show = c3.multiselect("الطبقات", ["EMA 21", "EMA 50", "EMA 200", "VWAP", "إشارات", "مستويات الصفقة", "مؤشر POC & Volume Profile", "القاع المحمي (Protected Low)", "📐 خطوط الاتجاه والمثلثات (Trendlines)"],
+                          default=["EMA 21", "مؤشر POC & Volume Profile", "القاع المحمي (Protected Low)", "📐 خطوط الاتجاه والمثلثات (Trendlines)"], key="ch_show")
+    df = hub.ohlcv(cfg["mk"], sym, tf, 300)
+    if df is not None and len(df) > 50:
+        d = add_indicators(df)
+        sig = next((s for s in sigs if s["symbol"] == sym), None) or analyze_symbol_tf(hub, cfg, sym, tf)
+        m = st.columns(6)
+        m[0].metric("السعر", fp(d.Close.iloc[-1]))
+        m[1].metric("القاع المحمي", fp(d.Protected_Low.iloc[-1]))
+        m[2].metric("القمة المحمية", fp(d.Protected_High.iloc[-1]))
+        m[3].metric("RSI", f"{d.RSI.iloc[-2]:.0f}")
+        m[4].metric("ADX", f"{d.ADX.iloc[-2]:.0f}")
+        m[5].metric("الهيكل", "صاعد 🟢" if d.Is_Above_Protected_Low.iloc[-1] else "هابط 🔴")
+        show_plot(build_chart(d, sig, show, bars=st.slider("عدد الشموع", 60, 300, 150)))
+
+def tab_market(hub, cfg):
+    tk = hub.tickers(cfg["mk"])
+    uni = hub.universe(cfg["mk"], cfg["min_vol"])
+    if uni:
+        df = pd.DataFrame([{"العملة": s.split("/")[0], "السعر": tk[s].get("last"), "24س %": round(tk[s].get("percentage") or 0, 2), "الحجم": tk[s]["quoteVolume"]} for s, _ in uni])
+        top = df.nlargest(60, "الحجم")
+        fig = go.Figure(go.Treemap(labels=top["العملة"], parents=[""] * len(top), values=top["الحجم"], text=[f"{v:+.2f}%" for v in top["24س %"]], textinfo="label+text", marker=dict(colors=top["24س %"], colorscale=[[0, DOWN], [0.5, "#2b3139"], [1, UP]], cmid=0)))
+        fig.update_layout(height=480, template="plotly_dark", paper_bgcolor=BG, margin=dict(l=0, r=0, t=8, b=0))
+        st.markdown("#### الخريطة الحرارية للسوق")
+        show_plot(fig)
+
+def tab_backtest(hub, cfg):
+    uni = [s for s, _ in hub.universe(cfg["mk"], cfg["min_vol"])] or [Hub.sym(cfg["mk"], "BTC")]
+    c = st.columns(4)
+    sym = c[0].selectbox("العملة", uni, format_func=lambda s: s.split("/")[0], key="bt_sym")
+    tf = c[1].selectbox("الإطار", list(TF_SEC), index=list(TF_SEC).index(cfg["tf"]), key="bt_tf")
+    risk = c[2].slider("المخاطرة %", 0.25, 5.0, 1.0, key="bt_risk")
+    conf = c[3].slider("أدنى ثقة %", 50, 90, cfg["min_conf"], key="bt_conf")
+    if st.button("▶️ تشغيل الباك تست", type="primary"):
+        df = hub.ohlcv(cfg["mk"], sym, tf, 1000)
+        if df is not None:
+            d = add_indicators(df)
+            trades, curve = run_backtest(d, list(STRATS), conf, risk, 0.0005)
+            if trades:
+                t = pd.DataFrame(trades)
+                st.success(f"تم تنفيذ {len(t)} صفقة | نسبة النجاح: {(t.R > 0).mean()*100:.0f}%")
+                show_df(t.iloc[::-1])
+
+def tab_calc():
+    c = st.columns(4)
+    side = c[0].radio("الصفقة", ["شراء", "بيع"], horizontal=True)
+    bal = c[1].number_input("الرصيد ($)", 10.0, 1e8, 10000.0)
+    risk = c[2].number_input("المخاطرة %", 0.1, 20.0, 1.0)
+    lev = c[3].number_input("الرافعة", 1, 125, 5)
+    c2 = st.columns(2)
+    entry = c2[0].number_input("سعر الدخول", 0.0, 1e9, 100.0)
+    sl = c2[1].number_input("وقف الخسارة", 0.0, 1e9, 97.0)
+    dist = abs(entry - sl)
+    if entry > 0 and dist > 0:
+        risk_amt = bal * risk / 100
+        notional = risk_amt / (dist / entry)
+        st.info(f"المبلغ المعرض للخسارة: **${risk_amt:,.2f}** | حجم المركز: **${notional:,.2f}** | الهامش المطلوب: **${notional/lev:,.2f}**")
+
+def main():
+    st.set_page_config(page_title="NEXUS Terminal Autonomous", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+    ensure_theme()
+    st.markdown(CSS, unsafe_allow_html=True)
+    cfg, A = sidebar()
+    hub = get_hub(cfg["demo"])
+    if "acct" not in st.session_state: st.session_state.acct = load_acct(A["start"])
+
+    tk = hub.tickers(cfg["mk"])
+    cols = st.columns(5)
+    for col, b in zip(cols, ["BTC", "ETH", "BNB", "SOL", "XRP"]):
+        t = tk.get(Hub.sym(cfg["mk"], b))
+        if t: col.metric(f"{b}/USDT", fp(t.get("last")), f"{(t.get('percentage') or 0):+.2f}%")
+
+    tabs = st.tabs(["📡 الماسح", "🤖 التداول التلقائي", "📈 الشارت", "🌍 السوق", "🧪 باك تست", "🧮 المخاطر"])
+    with tabs[0]: tab_scanner(hub, cfg)
+    with tabs[1]: tab_auto(hub, cfg, A)
+    with tabs[2]: tab_chart(hub, cfg)
+    with tabs[3]: tab_market(hub, cfg)
+    with tabs[4]: tab_backtest(hub, cfg)
+    with tabs[5]: tab_calc()
+
+if __name__ == "__main__":
+    main()
