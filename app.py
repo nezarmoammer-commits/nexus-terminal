@@ -188,7 +188,7 @@ class Hub:
             self.error = str(e)[:300]
             return {}
 
-    def universe(self, mk: str, min_vol: float, sort_asc: bool = False) -> list:
+    def universe(self, mk: str, min_vol: float, sort_asc: bool = False, **kwargs) -> list:
         tk = self.tickers(mk)
         suffix = "/USDT:USDT" if mk == "futures" else "/USDT"
         out = []
@@ -226,8 +226,11 @@ class Hub:
                 except Exception: pass
             return out
 
-@st.cache_resource(show_spinner=False)
-def get_hub(demo: bool) -> Hub: return Hub(demo)
+def get_hub(demo: bool) -> Hub:
+    """إلغاء التخزين المؤقت لتجنب تجميد الكائن المخبأ قديمًا"""
+    if "hub_instance" not in st.session_state or st.session_state.hub_instance.demo != demo:
+        st.session_state.hub_instance = Hub(demo)
+    return st.session_state.hub_instance
 
 # ──────────────────────────────────────────────────────────────────────────────
 # حساب المؤشرات + القاع المحمي + خطوط الاتجاه المصلحة
