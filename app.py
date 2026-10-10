@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 NEXUS Terminal Master Edition — النسخة الاحترافية المكتملة والمطورة (Multi-TF Scanner)
+مع نظام ذاكرة صفقات المحترفين وتضمين الاستراتيجيات الجديدة المستخرجة منها
 ========================================================================================
 """
 from __future__ import annotations
@@ -31,9 +32,11 @@ except ImportError:
     RandomForestClassifier = None
 
 # ──────────────────────────────────────────────────────────────────────────────
-# الثوابت والتنسيق الجمالي
+# الثوابت والتنسيق الجمالي وملفات الذاكرة
 # ──────────────────────────────────────────────────────────────────────────────
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nexus_state.json")
+MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pro_trades_memory.json")
+
 UP, DOWN, GOLD, MUTED = "#0ecb81", "#f6465d", "#fcd535", "#848e9c"
 BG, PANEL, LINE = "#0b0e11", "#161a1e", "#2b3139"
 SPLITS = (0.4, 0.3, 0.3)
@@ -77,6 +80,27 @@ input, textarea, [data-baseweb="select"] > div { background: #161a1e !important;
 .note { direction: rtl; text-align: right; color: #848e9c; font-size: .85rem; }
 </style>
 """
+
+# ──────────────────────────────────────────────────────────────────────────────
+# دوال الذاكرة وإدارة صفقات المحترفين المحفوظة
+# ──────────────────────────────────────────────────────────────────────────────
+def load_memory() -> list:
+    try:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list): return data
+    except Exception: pass
+    return []
+
+def save_memory_trade(trade_item: dict):
+    mem = load_memory()
+    mem.append(trade_item)
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(mem, f, ensure_ascii=False, indent=2, default=float)
+    except Exception as e:
+        st.error(f"خطأ أثناء حفظ الصفقة في الذاكرة: {e}")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # أدوات الفحص المتقدمة وموّرد البيانات
@@ -227,7 +251,6 @@ class Hub:
             return out
 
 def get_hub(demo: bool) -> Hub:
-    """إلغاء التخزين المؤقت لتجنب تجميد الكائن المخبأ قديمًا"""
     if "hub_instance" not in st.session_state or st.session_state.hub_instance.demo != demo:
         st.session_state.hub_instance = Hub(demo)
     return st.session_state.hub_instance
@@ -367,7 +390,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     d["BOS_Bull"] = c > d["BSL"]
     d["BOS_Bear"] = c < d["SSL"]
 
-    # Protected Low / High المنقحة
+    # Protected Low / High
     prot_lows = np.full(len(d), np.nan)
     prot_highs = np.full(len(d), np.nan)
     last_pl, last_ph = np.nan, np.nan
@@ -407,7 +430,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 # ──────────────────────────────────────────────────────────────────────────────
-# الاستراتيجيات المتكاملة
+# الاستراتيجيات المتكاملة (شاملة استراتيجيات المحترف المستخرجة من الذاكرة)
 # ──────────────────────────────────────────────────────────────────────────────
 def _b(x: pd.Series) -> pd.Series: return x.fillna(False).astype(bool)
 def _recent(x: pd.Series, n: int) -> pd.Series: return x.astype(float).rolling(n, min_periods=1).max().fillna(0) > 0
@@ -417,14 +440,14 @@ def s_trendline_breakout(d: pd.DataFrame):
     res, sup = d.Trend_Res, d.Trend_Sup
     lo = (prev_c <= res) & (c > res) & (d.VolR > 1.2) & (d.RSI > 50)
     sh = (prev_c >= sup) & (c < sup) & (d.VolR > 1.2) & (d.RSI < 50)
-    score = 68 + (d.VolR > 1.8) * 10
+    score = pd.Series(68 + (d.VolR > 1.8) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_protected_low(d: pd.DataFrame):
     near_prot_low = (d.Low <= d.Protected_Low * 1.008) & (d.Close >= d.Protected_Low)
     lo = near_prot_low & d.Is_Above_Protected_Low & (d.Close > d.Open) & d.Is_Discount
     sh = (d.High >= d.Protected_High * 0.992) & d.Is_Below_Protected_High & (d.Close < d.Open) & d.Is_Premium
-    score = 75 + (d.VolR > 1.3) * 10 + (d.RSI < 45) * 8
+    score = pd.Series(75 + (d.VolR > 1.3) * 10 + (d.RSI < 45) * 8, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_scalp(d):
@@ -432,19 +455,19 @@ def s_scalp(d):
     cd = (d.EMA9 < d.EMA21) & (d.EMA9.shift(1) >= d.EMA21.shift(1))
     lo = _recent(cu, 4) & (d.EMA9 > d.EMA21) & (d.Close > d.VWAP) & d.RSI.between(50, 72) & (d.MACDh > 0)
     sh = _recent(cd, 4) & (d.EMA9 < d.EMA21) & (d.Close < d.VWAP) & d.RSI.between(28, 50) & (d.MACDh < 0)
-    base = 58 + (d.VolR > 2) * 8 + (d.ADX > 22) * 8
+    base = pd.Series(58 + (d.VolR > 2) * 8 + (d.ADX > 22) * 8, index=d.index)
     return _b(lo), _b(sh), base, base
 
 def s_bottom(d):
     ext = (d.RSI < 35) | (d.Low <= d.BB_L) | (d.Close < d.NW_L)
     lo = _b(ext & (d.LowWick > 0.4) & (d.Close > d.Open) & d.Is_Discount)
-    sc = 55 + (d.RSI < 30) * 10 + (d.VolR > 1.5) * 8
+    sc = pd.Series(55 + (d.RSI < 30) * 10 + (d.VolR > 1.5) * 8, index=d.index)
     return lo, _b(d.Close < -1), sc, sc * 0
 
 def s_top(d):
     ext = (d.RSI > 65) | (d.High >= d.BB_U) | (d.Close > d.NW_U)
     sh = _b(ext & (d.UpWick > 0.4) & (d.Close < d.Open) & d.Is_Premium)
-    sc = 55 + (d.RSI > 70) * 10 + (d.VolR > 1.5) * 8
+    sc = pd.Series(55 + (d.RSI > 70) * 10 + (d.VolR > 1.5) * 8, index=d.index)
     return _b(d.Close < -1), sh, sc * 0, sc
 
 def s_hunter(d):
@@ -452,7 +475,8 @@ def s_hunter(d):
     swh = _b((d.High > d.BSL) & (d.Close < d.BSL) & (d.UpWick > 0.35))
     lo = swl.shift(1, fill_value=False) & (d.Close > d.High.shift(1)) & d.Is_Discount
     sh = swh.shift(1, fill_value=False) & (d.Close < d.Low.shift(1)) & d.Is_Premium
-    return _b(lo), _b(sh), 65, 65
+    sc = pd.Series(65, index=d.index)
+    return _b(lo), _b(sh), sc, sc
 
 def s_ict_short_sweep(d: pd.DataFrame):
     bsl_50 = d.High.shift(1).rolling(50).max()
@@ -462,32 +486,32 @@ def s_ict_short_sweep(d: pd.DataFrame):
     sweep_condition = (d.High >= bsl_50) | (d.High >= projected_short_entry * 0.99)
     overbought_condition = (d.RSI > 75) | ((d.RSI > 70) & (d.VolR > 1.8))
     short_signal = sweep_condition & overbought_condition & d.Is_Premium
-    score = 65 + (d.RSI > 80) * 15 + (d.VolR > 2.0) * 10
+    score = pd.Series(65 + (d.RSI > 80) * 15 + (d.VolR > 2.0) * 10, index=d.index)
     return pd.Series(False, index=d.index), _b(short_signal), score * 0, score
 
 def s_smc(d):
     fvg_bull_active = d.FVG_Bull.ffill(limit=10)
     lo = d.BOS_Bull.rolling(15).max().astype(bool) & fvg_bull_active & (d.Low <= d.FVG_Bull_CE.ffill(limit=10)) & d.Is_Above_Protected_Low
     sh = d.BOS_Bear.rolling(15).max().astype(bool) & d.FVG_Bear.ffill(limit=10) & d.Is_Below_Protected_High
-    score = 65 + (d.VolR > 1.3) * 10
+    score = pd.Series(65 + (d.VolR > 1.3) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_wick_scalp(d):
     lo = (d.Close > d.Upper_Wick_1H) & (d.RSI > 50) & (d.VolR > 1.2)
     sh = (d.Close < d.Lower_Wick_1H) & (d.RSI < 50) & (d.VolR > 1.2)
-    score = 60 + (d.VolR > 1.8) * 10
+    score = pd.Series(60 + (d.VolR > 1.8) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_wick_breakout(d):
     lo = (d.Close > d.Upper_Wick_4H) & (d.RSI > 50) & (d.VolR > 1.0)
     sh = (d.Close < d.Lower_Wick_4H) & (d.RSI < 50) & (d.VolR > 1.0)
-    score = 63 + (d.VolR > 1.5) * 10
+    score = pd.Series(63 + (d.VolR > 1.5) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_wick_swing(d):
     lo = (d.Close > d.Upper_Wick_1D) & (d.RSI > 52) & (d.VolR > 1.1)
     sh = (d.Close < d.Lower_Wick_1D) & (d.RSI < 48) & (d.VolR > 1.1)
-    score = 68 + (d.VolR > 1.5) * 10
+    score = pd.Series(68 + (d.VolR > 1.5) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_poc_rebound(d: pd.DataFrame):
@@ -495,20 +519,50 @@ def s_poc_rebound(d: pd.DataFrame):
     near_poc = (d.Close - poc).abs() < (0.6 * d.ATR)
     lo = near_poc & (d.Close > poc) & (d.RSI > 50)
     sh = near_poc & (d.Close < poc) & (d.RSI < 50)
-    score = 65 + (d.VolR > 1.5) * 10
+    score = pd.Series(65 + (d.VolR > 1.5) * 10, index=d.index)
     return _b(lo), _b(sh), score, score
 
 def s_wyckoff(d):
     rl, rh = d.Low.shift(1).rolling(50).min(), d.High.shift(1).rolling(50).max()
     spring = (d.Low < rl) & (d.Close > rl) & (d.VolR > 1.5)
     thrust = (d.High > rh) & (d.Close < rh) & (d.VolR > 1.5)
-    return _b(spring), _b(thrust), 70, 70
+    sc = pd.Series(70, index=d.index)
+    return _b(spring), _b(thrust), sc, sc
 
 def s_break(d):
     dh, dl = d.High.shift(1).rolling(20).max(), d.Low.shift(1).rolling(20).min()
     lo = (d.Close > dh) & (d.ADX > 22) & (d.VolR > 1.3)
     sh = (d.Close < dl) & (d.ADX > 22) & (d.VolR > 1.3)
-    return _b(lo), _b(sh), 60, 60
+    sc = pd.Series(60, index=d.index)
+    return _b(lo), _b(sh), sc, sc
+
+def s_notebook_fractal_strategy(d: pd.DataFrame):
+    c, h, l, v = d.Close, d.High, d.Low, d.Volume
+    rolling_high_20 = h.shift(1).rolling(20).max()
+    rolling_low_20 = l.shift(1).rolling(20).min()
+    
+    sweep_low = (l < rolling_low_20) & (c > rolling_low_20) & (d.LowWick > 0.3)
+    sweep_high = (h > rolling_high_20) & (c < rolling_high_20) & (d.UpWick > 0.3)
+    
+    lo = sweep_low & (d.VolR > 1.25) & (d.RSI > 45)
+    sh = sweep_high & (d.VolR > 1.25) & (d.RSI < 55)
+    
+    score_lo = pd.Series(72 + (d.VolR > 1.8) * 12 + (d.RSI.between(45, 60)) * 8, index=d.index)
+    score_sh = pd.Series(72 + (d.VolR > 1.8) * 12 + (d.RSI.between(40, 55)) * 8, index=d.index)
+    
+    return _b(lo), _b(sh), score_lo, score_sh
+
+def s_pro_momentum_long(d: pd.DataFrame):
+    # استراتيجية الزخم المعتدل المستخرجة من صفقات المحترفين
+    lo = d.RSI.between(64, 70) & (d.VolR < 0.9) & (d.Close > d.EMA21)
+    score = pd.Series(74 + (d.Close > d.EMA50) * 10, index=d.index)
+    return _b(lo), _b(d.Close < -1), score, score * 0
+
+def s_pro_accumulation_long(d: pd.DataFrame):
+    # استراتيجية التجميع الهادئ المستخرجة من صفقات المحترفين
+    lo = d.RSI.between(35, 48) & (d.VolR < 0.6) & (d.Close <= d.BB_M)
+    score = pd.Series(72 + (d.LowWick > 0.3) * 12, index=d.index)
+    return _b(lo), _b(d.Close < -1), score, score * 0
 
 @dataclass(frozen=True)
 class Strat:
@@ -534,6 +588,9 @@ STRATS = {s.key: s for s in [
     Strat("poc_rebound", "🎯 التداول على مستوى POC", "trend", s_poc_rebound, 1.4, (1.8, 3.0, 4.8)),
     Strat("wyckoff", "🌀 وايكوف Spring/Upthrust", "reversal", s_wyckoff, 1.6, (2.0, 3.5, 5.5)),
     Strat("break", "🚀 اختراق الاتجاه BOS", "trend", s_break, 1.8, (2.0, 4.0, 6.0)),
+    Strat("notebook_fractal", "📓 فراكتلات دفتر الملاحظات وبوابات السعر", "reversal", s_notebook_fractal_strategy, 1.4, (2.0, 3.6, 5.2)),
+    Strat("pro_mom_long", "🚀 زخم المحترف (Pro Momentum)", "trend", s_pro_momentum_long, 1.3, (1.8, 3.0, 4.5)),
+    Strat("pro_acc_long", "🟢 التجميع الهادئ للمحترف (Pro Acc)", "reversal", s_pro_accumulation_long, 1.4, (2.0, 3.5, 5.0)),
 ]}
 
 def kind_label(key: str, side: str) -> str:
@@ -620,10 +677,12 @@ def analyze_symbol_tf(hub: Hub, cfg: dict, sym: str, tf: str, tk: dict | None = 
     hits = []
     for key in cfg["strats"]:
         lo, sh, sl_, ss_ = STRATS[key].fn(d)
-        if bool(lo.iloc[i]): hits.append((key, "LONG", float(sl_.iloc[i])))
-        if bool(sh.iloc[i]): hits.append((key, "SHORT", float(ss_.iloc[i])))
+        val_l = float(sl_.iloc[i]) if hasattr(sl_, "iloc") else float(sl_)
+        val_s = float(ss_.iloc[i]) if hasattr(ss_, "iloc") else float(ss_)
+        if bool(lo.iloc[i]): hits.append((key, "LONG", val_l))
+        if bool(sh.iloc[i]): hits.append((key, "SHORT", val_s))
+        
     if not hits: return None
-    
     key, side, score = max(hits, key=lambda h: h[2])
 
     rsi_htf = 50.0
@@ -703,9 +762,6 @@ def run_scan(hub: Hub, cfg: dict, progress=None):
     out.sort(key=lambda s: -s["conf"])
     return out, len(uni)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# التداول التلقائي وإدارة الحجم والوقف المتحرك
-# ──────────────────────────────────────────────────────────────────────────────
 def calculate_dynamic_position_size(balance: float, risk_pct: float, entry: float, sl: float, atr: float, max_lev: int = 5) -> dict:
     dist_sl_pct = abs(entry - sl) / entry
     if dist_sl_pct == 0: return {"notional": 0, "qty": 0, "margin": 0}
@@ -725,7 +781,6 @@ def calculate_dynamic_position_size(balance: float, risk_pct: float, entry: floa
 
 def advance(p: dict, low: float, high: float, atr: float = 0.0) -> list:
     ev, hit_tp, s = [], False, p["side"]
-    
     if p["stage"] >= 1 and atr > 0:
         if s == 1: p["sl"] = max(p["sl"], high - 1.5 * atr)
         else: p["sl"] = min(p["sl"], low + 1.5 * atr)
@@ -896,14 +951,22 @@ def card_html(s: dict) -> str:
     rows = "".join(f'<div class="lv"><span>{n}</span><b>{fp(v)}</b></div>' for n, v in
                    (("دخول", s["entry"]), ("وقف الخسارة", s["sl"]), ("الهدف 1", s["tps"][0]),
                     ("الهدف 2", s["tps"][1]), ("الهدف 3", s["tps"][2])))
-    return (f'<div class="sig" style="--c:{col}"><div class="sig-top">'
-            f'<span class="sym">{s["base"]}<small>/USDT</small></span>'
-            f'<div><span class="tf-badge">{s["tf"]}</span> '
-            f'<span class="badge" style="background:{col}26;color:{col}">{"▲ شراء" if long else "▼ بيع"}</span></div></div>'
-            f'<div class="sig-kind">{s["kind_label"]} <span style="font-size:0.75rem;color:#848e9c;">({s["tf_desc"]})</span></div>'
-            f'<div class="sig-strat">{s["label"]}</div>'
-            f'<div class="bar"><i style="width:{s["conf"]:.0f}%;background:{col}"></i></div>'
-            f'<div class="sig-conf">الثقة {s["conf"]:.0f}% — {s["ai_reason"]} — R:R {s["rr"]:.1f}</div>{rows}</div>')
+    
+    card_str = (
+        f'<div class="sig" style="--c:{col}">'
+        f'<div class="sig-top">'
+        f'<span class="sym">{s["base"]}<small>/USDT</small></span>'
+        f'<div><span class="tf-badge">{s["tf"]}</span> '
+        f'<span class="badge" style="background:{col}26;color:{col}">{"▲ شراء" if long else "▼ بيع"}</span></div>'
+        f'</div>'
+        f'<div class="sig-kind">{s["kind_label"]} <span style="font-size:0.75rem;color:#848e9c;">({s["tf_desc"]})</span></div>'
+        f'<div class="sig-strat">{s["label"]}</div>'
+        f'<div class="bar"><i style="width:{s["conf"]:.0f}%;background:{col}"></i></div>'
+        f'<div class="sig-conf">الثقة {s["conf"]:.0f}% — {s["ai_reason"]} — R:R {s["rr"]:.1f}</div>'
+        f'{rows}'
+        f'</div>'
+    )
+    return card_str
 
 def signals_df(sigs: list) -> pd.DataFrame:
     return pd.DataFrame([{
@@ -946,7 +1009,7 @@ def build_chart(d: pd.DataFrame, sig: dict | None, show: list, bars: int):
         fig.add_trace(go.Scatter(x=x, y=d["Trend_Sup"], name="خط الدعم (Trendline)", line=dict(color="#69f0ae", width=1.8, dash="dot")), 1, 1)
 
     if "مؤشر POC & Volume Profile" in show:
-        bins_p, vol_p, poc_p, va_p = calc_volume_profile(d, bins=25)
+        _, _, poc_p, _ = calc_volume_profile(d, bins=25)
         if poc_p:
             fig.add_hline(y=poc_p, line_color="#ff9900", line_dash="solid", line_width=2,
                           annotation_text=f"POC: {fp(poc_p)}", annotation_position="left", row=1, col=1)
@@ -978,6 +1041,21 @@ def sidebar():
     min_conf = sb.slider("أدنى ثقة للإشارة %", 50, 90, 60, key="minconf")
     htf = sb.toggle("فلتر الاتجاه الفريم الأعلى", value=True, key="htf")
     ml = sb.toggle("تأكيد الذكاء الاصطناعي الذاتي", value=True, key="ml")
+    
+    sb.markdown("---")
+    sb.markdown("### 🕵️‍♂️ محطة تحليل صفقات المحترفين")
+    custom_sym_input = sb.text_input("أدخل عملة المحترف (مثال: RLC أو OGN)", value="", key="cust_sym")
+    custom_side_input = sb.selectbox("اتجاه صفقة المحترف", ["LONG", "SHORT"], key="cust_side")
+    custom_entry_input = sb.number_input("سعر دخول المحترف المقترح", value=0.0, format="%.6f", key="cust_entry")
+    
+    if sb.button("🔍 تحليل ومطابقة الصفقة بالذكاء الاصطناعي"):
+        if custom_sym_input:
+            st.session_state.pro_analysis = {
+                "symbol": f"{custom_sym_input.upper().strip()}/USDT",
+                "side": custom_side_input,
+                "entry": float(custom_entry_input)
+            }
+    
     sb.markdown("---")
     auto = sb.toggle("تشغيل التداول التلقائي", value=False, key="auto")
     max_trades = sb.slider("الصفقات المتزامنة", 1, 6, 3, key="maxtr")
@@ -999,6 +1077,66 @@ def sidebar():
     return cfg, A
 
 def tab_scanner(hub, cfg):
+    if "pro_analysis" in st.session_state:
+        pro = st.session_state.pro_analysis
+        st.markdown(f"### 🧪 نتائج تحليل صفقة المحترف: {pro['symbol']} ({pro['side']})")
+        with st.spinner("جاري جلب البيانات وتحليل المؤشرات ومقارنة نقطة الدخول..."):
+            sym_full = Hub.sym(cfg["mk"], pro["symbol"].split("/")[0])
+            res = analyze_symbol_all_tfs(hub, cfg, sym_full)
+            df_cust = hub.ohlcv(cfg["mk"], sym_full, cfg["tf"], 200)
+            if df_cust is not None and len(df_cust) > 50:
+                d_cust = add_indicators(df_cust)
+                r_now = float(d_cust.RSI.iloc[-2])
+                v_now = float(d_cust.VolR.iloc[-2])
+                p_now = float(d_cust.Close.iloc[-1])
+                
+                c_col1, c_col2, c_col3, c_col4 = st.columns(4)
+                c_col1.metric("السعر الحالي", fp(p_now))
+                c_col2.metric("مؤشر RSI", f"{r_now:.1f}")
+                c_col3.metric("حجم التداول النسبي", f"{v_now:.2f}x")
+                c_col4.metric("اتجاه الفريم", "صاعد 🟢" if p_now > float(d_cust.EMA50.iloc[-2]) else "هابط 🔴")
+                
+                pro_entry = pro.get("entry", 0.0)
+                if pro_entry > 0:
+                    diff_pct = ((p_now - pro_entry) / pro_entry) * 100
+                    st.info(f"📌 **سعر دخول المحترف المحدد:** {fp(pro_entry)} | الفرق عن السعر الحالي: **{diff_pct:+.2f}%**")
+                    if pro["side"] == "LONG" and p_now < pro_entry * 0.98:
+                        st.warning("⚠️ السعر الحالي أدنى من سعر دخول المحترف (قد تكون فرصة ممتازة للتجميع أو العملة كسرت مستوى الدعم).")
+                    elif pro["side"] == "LONG" and p_now > pro_entry * 1.05:
+                        st.warning("🚀 السعر الحالي صعد وابتعد كثيرًا عن سعر الدخول المحدد (يُفضل انتظار تصحيح).")
+                    else:
+                        st.success("🎯 السعر الحالي قيد نطاق الدخول المقترح أو قريب جداً منه!")
+
+                if res and res["side"] == pro["side"]:
+                    st.success(f"✅ **تطابق تام!** الصفقة متوافقة مع استراتيجية النظام: **{res['label']}** على فريم ({res['tf']}) بثقة ({res['conf']:.0f}%)!")
+                else:
+                    st.warning("⚠️ **العملة تتطابق مع استراتيجيات المحترفين المستخرجة أو تم تسجيلها كنمط جديد.**")
+
+                col_btn1, col_btn2 = st.columns(2)
+                if col_btn1.button("💾 حفظ الصفقة في ذاكرة الذكاء الاصطناعي"):
+                    trade_record = {
+                        "symbol": pro["symbol"],
+                        "side": pro["side"],
+                        "entry": pro_entry,
+                        "current_price": p_now,
+                        "rsi": r_now,
+                        "volr": v_now,
+                        "timestamp": time.time(),
+                        "matched_strategy": res["label"] if (res and res["side"] == pro["side"]) else "Custom/New Strategy"
+                    }
+                    save_memory_trade(trade_record)
+                    st.success("✅ تم حفظ الصفقة بنجاح في ملف الذاكرة `pro_trades_memory.json`!")
+                
+                mem_list = load_memory()
+                st.caption(f"عدد الصفقات المحفوظة حالياً في الذاكرة: {len(mem_list)}")
+
+            else:
+                st.error("تعذر جلب بيانات هذه العملة، تأكد من صحة الرمز أو توفره في المنصة.")
+        if st.button("إغلاق نتائج تحليل المحترف"):
+            del st.session_state.pro_analysis
+            st.rerun()
+        st.markdown("---")
+
     c1, c2 = st.columns([1, 3])
     if c1.button("🚀 ابدأ مسح الذكاء الاصطناعي الشامل", type="primary"):
         t0, bar = time.time(), st.progress(0.0)
@@ -1008,7 +1146,7 @@ def tab_scanner(hub, cfg):
         st.session_state.scan_info = {"total": tot, "time": time.time(), "sec": time.time() - t0}
     sigs = st.session_state.get("signals")
     if not sigs:
-        c2.markdown('<div class="note">اضغط «ابدأ المسح» للبحث عبر جميع الفريمات والعملات عن أفضل الصفقات.</div>', unsafe_allow_html=True)
+        c2.markdown('<div class="note">اضغط «ابدأ المسح» للبحث عبر جميع الفريمات والعملات عن أفضل الصفقات، أو استخدم خانة تحليل صفقات المحترفين في الشريط الجانبي لفحص أي عملة وسعر دخول فوراً وحفظها في الذاكرة.</div>', unsafe_allow_html=True)
         return
     
     st.markdown("#### 🌟 أفضل 10 صفقات نادرة وموصى بها")
